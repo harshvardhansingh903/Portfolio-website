@@ -487,6 +487,45 @@
     /* Cursor Adjustments */
     .light-mode-active #custom-cursor { background: rgba(0,0,0,0.8); box-shadow: 0 0 10px rgba(0,0,0,0.3); }
     .light-mode-active #custom-cursor.active-hover { background: rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.2); box-shadow: 0 0 20px rgba(0,0,0,0.1); }
+
+    /* --- Card Switching Effect --- */
+    .portfolio-container {
+      gap: 0;
+    }
+    .portfolio-container > section {
+      position: sticky;
+      top: 12vh;
+      background: #161618;
+      border-radius: 2rem;
+      padding: 4rem 3rem;
+      margin-bottom: 40vh;
+      box-shadow: 0 -20px 40px rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      transition: background 0.5s ease, border-color 0.5s ease, box-shadow 0.5s ease;
+    }
+    .portfolio-container > section:last-of-type {
+      margin-bottom: 5vh;
+    }
+    /* Reduce hero section wait time so it quickly transitions */
+    .portfolio-container > #hero {
+      margin-bottom: 20vh;
+      padding: 6rem 3rem;
+    }
+    .light-mode-active .portfolio-container > section {
+      background: #ffffff;
+      box-shadow: 0 -20px 40px rgba(0, 0, 0, 0.08);
+      border: 1px solid rgba(0, 0, 0, 0.08);
+    }
+    .section-divider {
+      display: none !important;
+    }
+    
+    @media (max-width: 768px) {
+      .portfolio-container > section {
+        padding: 3rem 1.5rem;
+        top: 15vh;
+      }
+    }
   </style>
 </head>
 <body class="light-mode-active">
@@ -655,7 +694,7 @@
           <h3 class="section-title reveal-elem">Experience</h3>
           <div class="exp-item hover-target reveal-elem delay-1">
             <div class="exp-header">
-              <h4 class="card-title">AI & ML Intern (Jan-Feb2026)</h4>
+              <h4 class="card-title">AI & ML Intern (Jan-Feb 2026)</h4>
               <span class="exp-company">QSkill</span>
             </div>
             <ul class="card-bullets">
