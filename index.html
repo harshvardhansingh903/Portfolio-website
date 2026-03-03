@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scroll-Controlled Frame Animation</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: #111;
+    }
+    body {
+      height: 300vh;
+    }
+    #frame-canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      background: #000;
+      z-index: 10;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+    }
+    #loading {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #000;
+      z-index: 50;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      transition: opacity 0.6s ease;
+    }
+    .loader-content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 15px;
+      width: 200px;
+    }
+    .loader-text {
+      font-size: 1.1rem;
+      font-weight: 500;
+      color: #a1a1a6;
+      letter-spacing: 0.5px;
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+    }
+    .loader-text span {
+      color: #f5f5f7;
+    }
+    .loader-bar {
+      width: 100%;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
+    }
+    .loader-progress {
+      height: 100%;
+      width: 0%;
+      background: #f5f5f7;
+      transition: width 0.3s ease;
+      border-radius: 4px;
+      box-shadow: 0 0 10px rgba(255,255,255,0.8);
+    }
+    #screen-overlay {
+      position: fixed;
+      z-index: 15;
+      background: #000;
+      border-radius: 6px;
+      overflow: hidden;
+      opacity: 0;
+      transform: scale(0.98);
+      pointer-events: none; /* Let scroll events pass to body until active */
+      box-shadow: inset 0 0 15px rgba(0,0,0,0.9), inset 0 1px 2px rgba(255,255,255,0.1);
+      will-change: transform, opacity;
+      transition: opacity 1.2s cubic-bezier(0.16, 1, 0.3, 1),
+                  transform 1.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    #screen-overlay.active {
+      opacity: 1;
+      transform: scale(1);
+      pointer-events: auto; /* Capture scrolling once open */
+    }
+    .screen-glow {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: radial-gradient(circle at center, rgba(255,255,255,0.15) 0%, transparent 65%);
+      opacity: 0;
+      pointer-events: none;
+      will-change: opacity;
+      transition: opacity 1.5s cubic-bezier(0.16, 1, 0.3, 1) 0.1s;
+    }
+    #screen-overlay.active .screen-glow {
+      opacity: 1;
+    }
+    .screen-content {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      /* Control independent scrolling securely */
+      overflow-y: hidden; 
+      overscroll-behavior-y: contain; /* Prevent body scroll bleed */
+      scrollbar-width: none; /* Hide scrollbar for clean look */
+      
+      color: white;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      transform: translateY(15px);
+      opacity: 0;
+      filter: blur(8px) brightness(1.5);
+      will-change: transform, opacity, filter;
+      transition: opacity 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.3s,
+                  transform 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.3s,
+                  filter 1.2s cubic-bezier(0.16, 1, 0.3, 1) 0.3s;
+                  
+      /* Portfolio UI optimizations */
+      scroll-behavior: smooth;
+      container-type: inline-size;
+    }
+    .screen-content::-webkit-scrollbar {
+      display: none;
+    }
+    #screen-overlay.active .screen-content {
+      overflow-y: auto; /* Enable inner scroll only after laptop opens */
+      transform: translateY(0);
+      opacity: 1;
+      filter: blur(0px) brightness(1);
+    }
+    
+    /* PORTFOLIO STYLES (Inside Screen Content) */
+    .portfolio-container {
+      width: 100%;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 12cqw 6cqw 15cqw 6cqw; 
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      gap: 8cqw; 
+    }
+    .top-nav {
+      position: sticky;
+      top: 2cqw;
+      z-index: 100;
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      width: fit-content;
+      margin: 2cqw auto -2cqw auto; /* offset bottom margin so it doesn't push start of content too much, or just rely on padding */
+      gap: clamp(1rem, 3cqw, 2rem);
+      padding: 0.8rem 1.5rem;
+      background: rgba(0, 0, 0, 0.6); /* slightly darker to stand out over scroll */
+      border-radius: 3rem;
+      backdrop-filter: blur(15px);
+      -webkit-backdrop-filter: blur(15px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    }
+    .top-nav a {
+      color: #a1a1a6;
+      text-decoration: none;
+      font-size: clamp(0.85rem, 2cqw, 1rem);
+      font-weight: 500;
+      transition: color 0.3s ease, transform 0.3s ease;
+    }
+    .top-nav a:hover {
+      color: #f5f5f7;
+      transform: scale(1.05);
+    }
+    .hero-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: 4cqw 0 6cqw 0;
+    }
+    .hero-title {
+      font-size: clamp(2rem, 7cqw, 4.5rem);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin: 0 0 1rem 0;
+      background: linear-gradient(270deg, #f5f5f7, #86868b, #ffffff, #a1a1a6);
+      background-size: 300% 300%;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: GradientText 8s ease infinite;
+    }
+    @keyframes GradientText {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+    .hero-subtitle {
+      font-size: clamp(1rem, 3cqw, 1.5rem);
+      font-weight: 400;
+      color: #a1a1a6;
+      margin: 0 0 2.5rem 0;
+    }
+    .hero-actions { display: flex; gap: 1rem; justify-content: center; }
+    .btn {
+      text-decoration: none; padding: 0.8rem 1.8rem; border-radius: 2rem;
+      font-size: clamp(0.9rem, 2cqw, 1rem); font-weight: 500;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .primary-btn { background: #f5f5f7; color: #1d1d1f; }
+    .primary-btn:hover { background: #fff; transform: scale(1.05); }
+    .secondary-btn { background: rgba(255, 255, 255, 0.08); color: #f5f5f7; backdrop-filter: blur(10px); }
+    .secondary-btn:hover { background: rgba(255, 255, 255, 0.15); transform: scale(1.05); }
+    
+    .section-divider {
+      width: 100%; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1) 50%, transparent);
+    }
+    .section-title {
+      font-size: clamp(1.5rem, 4.5cqw, 2.5rem);
+      font-weight: 600; color: #f5f5f7; margin: 0 0 2cqw 0; letter-spacing: -0.01em;
+    }
+    .about-text {
+      font-size: clamp(1.05rem, 2.5cqw, 1.25rem); line-height: 1.6;
+      color: #a1a1a6; margin: 0; max-width: 90%;
+    }
+    .projects-grid { display: flex; flex-direction: column; gap: 3cqw; width: 100%; }
+    .project-card, .exp-item {
+      background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 18px; padding: 4cqw; transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      width: 100%; box-sizing: border-box;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    .project-card:hover, .exp-item:hover {
+      background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.1);
+      box-shadow: 0 12px 25px rgba(0,0,0,0.4);
+    }
+    .tilt-card {
+      transform-style: preserve-3d;
+      will-change: transform;
+    }
+    .card-actions {
+      display: flex; gap: 1rem; margin-top: 1.5rem; padding-top: 1rem;
+      border-top: 1px solid rgba(255,255,255,0.05);
+    }
+    .card-link {
+      display: flex; align-items: center; gap: 6px;
+      color: #a1a1a6; text-decoration: none;
+      font-size: clamp(0.85rem, 2cqw, 0.95rem); font-weight: 500;
+      transition: color 0.3s ease;
+    }
+    .card-link svg {
+      width: 16px; height: 16px; fill: currentColor;
+    }
+    .card-link:hover { color: #f5f5f7; }
+    
+    .card-title { font-size: clamp(1.1rem, 3cqw, 1.4rem); font-weight: 500; color: #f5f5f7; margin: 0 0 0.5rem 0; transform: translateZ(20px); }
+    .card-desc { font-size: clamp(0.95rem, 2.2cqw, 1.1rem); color: #a1a1a6; margin: 0 0 1.25rem 0; line-height: 1.5; }
+    .card-bullets { list-style-type: none; padding: 0; margin: 0 0 1.5rem 0; color: #d2d2d7; font-size: clamp(0.9rem, 2cqw, 1rem); line-height: 1.6; }
+    .card-bullets li { position: relative; padding-left: 1.5rem; margin-bottom: 0.5rem; }
+    .card-bullets li::before { content: "•"; color: #86868b; position: absolute; left: 0; font-size: 1.2em; line-height: 1;}
+    .card-bullets strong { color: #f5f5f7; font-weight: 600; }
+    
+    .card-tags { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .card-tags span {
+      background: rgba(255,255,255,0.08); color: #d2d2d7;
+      padding: 0.4rem 0.8rem; border-radius: 12px; font-size: clamp(0.75rem, 1.8cqw, 0.9rem); font-weight: 500;
+    }
+    
+    .exp-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem; }
+    .exp-company { color: #86868b; font-size: clamp(1rem, 2.5cqw, 1.2rem); font-weight: 500; }
+    
+    .skills-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 3cqw; width: 100%; }
+    .cat-title { font-size: clamp(1rem, 2.5cqw, 1.2rem); font-weight: 500; color: #f5f5f7; margin: 0 0 1rem 0; padding-bottom: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    
+    .contact-section { text-align: center; align-items: center; display: flex; flex-direction: column; width: 100%; }
+
+    .portfolio-footer {
+      text-align: center;
+      margin-top: 8cqw;
+      padding-top: 4cqw;
+      border-top: 1px solid rgba(255,255,255,0.05);
+      color: #a1a1a6;
+      font-size: clamp(0.8rem, 2cqw, 0.95rem);
+    }
+    .footer-subtext {
+      font-size: clamp(0.7rem, 1.8cqw, 0.85rem);
+      color: #6e6e73;
+      margin-top: 0.5rem;
+    }
+    .light-mode-active .portfolio-footer { border-top-color: rgba(0,0,0,0.1); color: #86868b; }
+    .light-mode-active .footer-subtext { color: #a1a1a6; }
+
+    /* EFFECTS & ANIMATIONS */
+    .ambient-blob {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: 0.5;
+      z-index: -1;
+      pointer-events: none;
+      animation: floatBlob 20s infinite alternate cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .blob-1 { top: 5%; left: 0%; width: 40cqw; height: 40cqw; background: rgba(59, 130, 246, 0.15); animation-delay: 0s; }
+    .blob-2 { top: 40%; right: -10%; width: 50cqw; height: 50cqw; background: rgba(147, 51, 234, 0.1); animation-delay: -5s; }
+    .blob-3 { bottom: 10%; left: 10%; width: 45cqw; height: 45cqw; background: rgba(16, 185, 129, 0.12); animation-delay: -10s; }
+    
+    .light-mode-active .ambient-blob.blob-1 { background: rgba(59, 130, 246, 0.25); }
+    .light-mode-active .ambient-blob.blob-2 { background: rgba(147, 51, 234, 0.2); }
+    .light-mode-active .ambient-blob.blob-3 { background: rgba(16, 185, 129, 0.25); }
+
+    @keyframes floatBlob {
+      0% { transform: translate(0, 0) scale(1); }
+      33% { transform: translate(30px, -50px) scale(1.1); }
+      66% { transform: translate(-20px, 20px) scale(0.9); }
+      100% { transform: translate(40px, 40px) scale(1); }
+    }
+
+    .cursor-blink {
+      display: inline-block;
+      width: 2px;
+      animation: blink 1s step-end infinite;
+      color: #f5f5f7;
+    }
+    .light-mode-active .cursor-blink { color: #1d1d1f; }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .screen-content {
+      cursor: none; /* Hide default cursor */
+    }
+
+    /* Scroll reveal classes */
+    .reveal-elem {
+      opacity: 0;
+      transform: translateY(25px);
+      transition: opacity 1s cubic-bezier(0.16, 1, 0.3, 1), transform 1s cubic-bezier(0.16, 1, 0.3, 1);
+      will-change: opacity, transform;
+    }
+    .reveal-elem.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    
+    /* Delay staggers for child elements */
+    .delay-1 { transition-delay: 0.1s; }
+    .delay-2 { transition-delay: 0.2s; }
+    .delay-3 { transition-delay: 0.3s; }
+    
+    /* Subtle Parallax Background shifts */
+    .parallax-layer {
+      position: relative;
+      will-change: transform;
+    }
+
+    /* Dynamic Cursor */
+    #custom-cursor {
+      position: fixed;
+      top: 0; left: 0;
+      width: 12px; height: 12px;
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 9999;
+      box-shadow: 0 0 10px rgba(255, 255, 255, 0.4);
+      transform: translate(-50%, -50%);
+      transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1), 
+                  height 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+                  background 0.3s ease,
+                  box-shadow 0.3s ease;
+      will-change: transform, width, height;
+      opacity: 0; /* Hidden until laptop opens */
+    }
+    #custom-cursor.active-hover {
+      width: 48px;
+      height: 48px;
+      background: rgba(255, 255, 255, 0.1);
+      box-shadow: 0 0 20px rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(2px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+    
+    #scroll-instruction {
+      position: fixed;
+      bottom: 8%;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(255, 255, 255, 0.8);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: clamp(0.9rem, 2.5cqw, 1.2rem);
+      font-weight: 400;
+      letter-spacing: 1px;
+      z-index: 25;
+      pointer-events: none;
+      opacity: 1;
+      transition: opacity 0.6s ease;
+      animation: bounce 2s infinite cubic-bezier(0.28, 0.84, 0.42, 1);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    #scroll-instruction::after {
+      content: '';
+      display: block;
+      width: 1px;
+      height: 24px;
+      background: linear-gradient(to bottom, rgba(255,255,255,0.8), transparent);
+    }
+    #scroll-instruction.hidden {
+      opacity: 0 !important;
+    }
+
+    @keyframes bounce {
+      0%, 20%, 50%, 80%, 100% { transform: translateY(0) translateX(-50%); }
+      40% { transform: translateY(-10px) translateX(-50%); }
+      60% { transform: translateY(-5px) translateX(-50%); }
+    }
+
+    /* THEME TOGGLE & LIGHT MODE STYLES */
+    .theme-toggle {
+      position: absolute;
+      top: 2cqw;
+      right: 3cqw;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #f5f5f7;
+      border-radius: 50%;
+      width: clamp(2.5rem, 5cqw, 3.5rem);
+      height: clamp(2.5rem, 5cqw, 3.5rem);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      backdrop-filter: blur(10px);
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .theme-toggle:hover {
+      background: rgba(255, 255, 255, 0.15);
+      transform: scale(1.1);
+    }
+    .theme-toggle svg {
+      width: 1.5rem; height: 1.5rem; fill: currentColor;
+      transition: transform 0.5s ease;
+    }
+    .theme-toggle .moon-icon { display: none; }
+    
+    /* Light Mode Overrides */
+    .light-mode { background: #f5f5f7 !important; color: #1d1d1f !important; }
+    .light-mode-active #screen-overlay { background: #f5f5f7; }
+    .light-mode-active .screen-content { color: #1d1d1f; }
+    .light-mode-active .hero-title { background: linear-gradient(270deg, #1d1d1f, #515154, #000000, #333333); background-size: 300% 300%; -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .light-mode-active .section-title, .light-mode-active .cat-title, .light-mode-active .card-title, .light-mode-active .card-bullets strong { color: #1d1d1f; }
+    .light-mode-active .hero-subtitle, .light-mode-active .about-text, .light-mode-active .card-desc, .light-mode-active .card-bullets, .light-mode-active .exp-company { color: #515154; }
+    .light-mode-active .primary-btn { background: #1d1d1f; color: #f5f5f7; }
+    .light-mode-active .primary-btn:hover { background: #000; transform: scale(1.05); }
+    .light-mode-active .secondary-btn, .light-mode-active .card-tags span { background: rgba(0,0,0,0.05); color: #1d1d1f; border-color: rgba(0,0,0,0.1); }
+    .light-mode-active .secondary-btn:hover { background: rgba(0,0,0,0.1); transform: scale(1.05); }
+    .light-mode-active .project-card, .light-mode-active .exp-item { background: #fff; border-color: rgba(0,0,0,0.08); box-shadow: 0 4px 15px rgba(0,0,0,0.04); }
+    .light-mode-active .project-card:hover, .light-mode-active .exp-item:hover { background: #fafafa; border-color: rgba(0,0,0,0.15); box-shadow: 0 12px 25px rgba(0,0,0,0.08); }
+    .light-mode-active .section-divider { background: linear-gradient(90deg, transparent, rgba(0,0,0,0.1) 50%, transparent); }
+    .light-mode-active .cat-title { border-bottom-color: rgba(0,0,0,0.1); }
+    .light-mode-active .top-nav { background: rgba(255,255,255,0.7); border-color: rgba(0,0,0,0.1); box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
+    .light-mode-active .top-nav a { color: #515154; }
+    .light-mode-active .top-nav a:hover { color: #1d1d1f; }
+    .light-mode-active .theme-toggle { background: #fff; color: #1d1d1f; border-color: rgba(0,0,0,0.1); box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+    .light-mode-active .theme-toggle:hover { background: #f0f0f0; }
+    .light-mode-active .theme-toggle .sun-icon { display: none; }
+    .light-mode-active .theme-toggle .moon-icon { display: block; }
+    .light-mode-active .card-actions { border-top-color: rgba(0,0,0,0.1); }
+    .light-mode-active .card-link { color: #515154; }
+    .light-mode-active .card-link:hover { color: #1d1d1f; }
+    
+    /* Loader Adjustments */
+    .light-mode-active #loading { background: #f5f5f7; color: #1d1d1f; }
+    .light-mode-active .loader-text { color: #515154; }
+    .light-mode-active .loader-text span { color: #1d1d1f; }
+    .light-mode-active .loader-bar { background: rgba(0,0,0,0.1); }
+    .light-mode-active .loader-progress { background: #1d1d1f; box-shadow: none; }
+
+    /* Scroll Instruction Adjustments */
+    .light-mode-active #scroll-instruction { color: rgba(0, 0, 0, 0.8); }
+    .light-mode-active #scroll-instruction::after { background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent); }
+
+    /* Cursor Adjustments */
+    .light-mode-active #custom-cursor { background: rgba(0,0,0,0.8); box-shadow: 0 0 10px rgba(0,0,0,0.3); }
+    .light-mode-active #custom-cursor.active-hover { background: rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.2); box-shadow: 0 0 20px rgba(0,0,0,0.1); }
+  </style>
+</head>
+<body class="light-mode-active">
+  <div id="scroll-instruction">Scroll down to open</div>
+  <div id="custom-cursor"></div>
+  <canvas id="frame-canvas" width="800" height="450"></canvas>
+  <div id="screen-overlay">
+    <div class="screen-glow"></div>
+    <div class="screen-content" id="scrollable-content">
+      <button id="theme-btn" class="theme-toggle hover-target" aria-label="Toggle Theme">
+        <!-- Sun Icon (showing in dark mode) -->
+        <svg class="sun-icon" viewBox="0 0 24 24"><path d="M12 2.25a.75.75 0 01.75.75v2.25a.75.75 0 01-1.5 0V3a.75.75 0 01.75-.75zM7.5 12a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zM18.894 6.166a.75.75 0 00-1.06-1.06l-1.591 1.59a.75.75 0 101.06 1.061l1.591-1.59zM21.75 12a.75.75 0 01-.75.75h-2.25a.75.75 0 010-1.5H21a.75.75 0 01.75.75zM17.834 18.894a.75.75 0 001.06-1.06l-1.59-1.591a.75.75 0 10-1.061 1.06l1.59 1.591zM12 18.75a.75.75 0 01.75.75V21a.75.75 0 01-1.5 0v-2.25a.75.75 0 01.75-.75zM6.166 18.894a.75.75 0 001.06 1.06l1.59-1.591a.75.75 0 10-1.06-1.061l-1.59 1.59zM4.5 12a.75.75 0 01-.75-.75H1.5a.75.75 0 000 1.5h2.25a.75.75 0 01.75-.75zM6.166 5.106a.75.75 0 00-1.06 1.06l1.59 1.591a.75.75 0 101.06-1.06l-1.59-1.591z"/></svg>
+        <!-- Moon Icon (showing in light mode) -->
+        <svg class="moon-icon" viewBox="0 0 24 24"><path d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/></svg>
+      </button>
+      <nav class="top-nav">
+        <a href="#about" class="hover-target">About</a>
+        <a href="#skills" class="hover-target">Skills</a>
+        <a href="#projects" class="hover-target">Projects</a>
+        <a href="#education" class="hover-target">Education</a>
+        <a href="#experience" class="hover-target">Experience</a>
+        <a href="#contact" class="hover-target">Contact</a>
+      </nav>
+      <div class="portfolio-container parallax-layer" id="parallax-bg">
+        <!-- Ambient Animated Background -->
+        <div class="ambient-blob blob-1"></div>
+        <div class="ambient-blob blob-2"></div>
+        <div class="ambient-blob blob-3"></div>
+        
+        <!-- Hero Section -->
+        <section id="hero" class="hero-section">
+          <h1 class="hero-title reveal-elem">Harshvardhan Singh</h1>
+          <h2 class="hero-subtitle reveal-elem delay-1"><span id="typed-text"></span><span class="cursor-blink">|</span></h2>
+          <div class="hero-actions reveal-elem delay-2">
+            <a href="https://drive.google.com/file/d/1SUqL1JB6hQ6nMgVEIUy1AbQgUaW8y8Ti/view?usp=sharing" target="_blank" rel="noopener noreferrer" class="btn primary-btn hover-target">Resume</a>
+            <a href="#contact" class="btn secondary-btn hover-target">Contact</a>
+          </div>
+        </section>
+
+        <!-- About Section -->
+        <section id="about" class="about-section">
+          <p class="about-text reveal-elem">
+            I am a Computer Science and Engineering student at VIT Bhopal specializing in Artificial Intelligence and Machine Learning. With a strong foundation in Python, C++, and Java , I focus on building scalable AI solutions and full-stack applications that solve real-world problems.My technical expertise spans the entire machine learning lifecycle—from data preprocessing and feature engineering to deploying real-time FastAPI services. Whether I am developing NLP-based classification systems or optimizing quantitative strategies , I thrive on turning complex datasets into actionable insights.
+          </p>
+        </section>
+
+        <div class="section-divider reveal-elem"></div>
+
+        <!-- Skills Section -->
+        <section id="skills" class="skills-section">
+          <h3 class="section-title reveal-elem">Skills</h3>
+          <div class="skills-grid">
+            <div class="skill-category reveal-elem">
+              <h5 class="cat-title">Programming</h5>
+              <div class="card-tags chip-tags">
+                <span>Python</span><span>C++</span><span>JavaScript</span><span>SQL</span>
+              </div>
+            </div>
+            <div class="skill-category reveal-elem delay-1">
+              <h5 class="cat-title">AI / ML</h5>
+              <div class="card-tags chip-tags">
+                <span>PyTorch</span><span>TensorFlow</span><span>Scikit-Learn</span><span>CV</span>
+              </div>
+            </div>
+            <div class="skill-category reveal-elem delay-2">
+              <h5 class="cat-title">Databases & Tools</h5>
+              <div class="card-tags chip-tags">
+                <span>PostgreSQL</span><span>Git</span><span>Docker</span><span>AWS</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="section-divider reveal-elem"></div>
+
+        <!-- Projects Section -->
+        <section id="projects" class="projects-section">
+          <h3 class="section-title reveal-elem">Projects</h3>
+          <div class="projects-grid">
+            <div class="project-card hover-target reveal-elem tilt-card">
+              <h4 class="card-title">StyleGennie Wardrobe</h4>
+              <p class="card-desc">AI-powered virtual wardrobe assistant optimizing outfit selection intuitively.</p>
+              <ul class="card-bullets">
+                <li>Engineered a custom recommendation engine utilizing sophisticated computer vision.</li>
+                <li>Reduced decision fatigue by delivering real-time style suggestions.</li>
+                <li>Integrated seamless user flow with zero-latency inference.</li>
+              </ul>
+              <div class="card-tags">
+                <span>Python</span><span>TensorFlow</span><span>OpenCV</span>
+              </div>
+              <div class="card-actions">
+                <a href="#" target="_blank" class="card-link hover-target"><svg viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.332-5.467-5.93 0-1.31.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg> Code</a>
+                <a href="#" target="_blank" class="card-link hover-target"><svg viewBox="0 0 24 24"><path d="M14 3h7v7M21 3l-9.5 9.5M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Demo</a>
+              </div>
+            </div>
+            <div class="project-card hover-target reveal-elem delay-1 tilt-card">
+              <h4 class="card-title">SwingSage</h4>
+              <p class="card-desc">Advanced EMA + RSI backtester for systematic trading strategies.</p>
+              <ul class="card-bullets">
+                <li>Developed an automated backtesting engine for technical indicators.</li>
+                <li>Optimized historical data parsing for rapid strategy validation.</li>
+                <li>Visualized win-rates and drawdown metrics with high fidelity.</li>
+              </ul>
+              <div class="card-tags">
+                <span>Python</span><span>Pandas</span><span>Finance</span>
+              </div>
+              <div class="card-actions">
+                <a href="#" target="_blank" class="card-link hover-target"><svg viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.332-5.467-5.93 0-1.31.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg> Code</a>
+              </div>
+            </div>
+            <div class="project-card hover-target reveal-elem delay-2 tilt-card">
+              <h4 class="card-title">NeuroVision</h4>
+              <p class="card-desc">Real-Time AI Health Analyzer interpreting medical imaging.</p>
+              <ul class="card-bullets">
+                <li>Deployed a convolutional neural network for real-time anomaly detection.</li>
+                <li>Achieved <strong>94%+</strong> accuracy on complex diagnostic datasets.</li>
+                <li>Architected edge-ready model infrastructure for immediate low-latency results.</li>
+              </ul>
+              <div class="card-tags">
+                <span>PyTorch</span><span>Computer Vision</span><span>MedTech</span>
+              </div>
+              <div class="card-actions">
+                <a href="#" target="_blank" class="card-link hover-target"><svg viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.332-5.467-5.93 0-1.31.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg> Code</a>
+                <a href="#" target="_blank" class="card-link hover-target"><svg viewBox="0 0 24 24"><path d="M14 3h7v7M21 3l-9.5 9.5M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> Demo</a>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div class="section-divider reveal-elem"></div>
+
+        <!-- Education Section -->
+        <section id="education" class="exp-section">
+          <h3 class="section-title reveal-elem">Education</h3>
+          <div class="exp-item hover-target reveal-elem delay-1">
+            <div class="exp-header">
+              <h4 class="card-title">Rajkiya Engineering College</h4>
+              <span class="exp-company">2022 – 2026</span>
+            </div>
+            <ul class="card-bullets">
+              <li>Bachelor of Technology in Information Technology</li>
+              <li>Relevant Coursework: Data Structures & Algorithms, Machine Learning, DBMS, Operating Systems.</li>
+            </ul>
+          </div>
+        </section>
+
+        <div class="section-divider reveal-elem"></div>
+
+        <!-- Experience Section -->
+        <section id="experience" class="exp-section">
+          <h3 class="section-title reveal-elem">Experience</h3>
+          <div class="exp-item hover-target reveal-elem delay-1">
+            <div class="exp-header">
+              <h4 class="card-title">AI & ML Intern (Jan-Feb2026)</h4>
+              <span class="exp-company">QSkill</span>
+            </div>
+            <ul class="card-bullets">
+              <li>Streamlined critical internal data pipelines, boosting operational efficiency by <strong>40%</strong>.</li>
+              <li>Collaborated across technical teams to ship robust features on aggressive production timelines.</li>
+              <li>Pioneered rapid-prototyping workflows for automated backend reporting microservices.</li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- Contact Section -->
+        <section id="contact" class="contact-section">
+          <h3 class="section-title reveal-elem">Get In Touch</h3>
+          <p class="about-text reveal-elem delay-1" style="text-align:center; max-width: 100%;">Currently seeking new opportunities in AI & Software Development roles.</p>
+          <div class="hero-actions reveal-elem delay-2" style="margin-top: 2rem; justify-content: center;">
+            <a href="mailto:harshvardhansingh903@gmail.com" class="btn primary-btn hover-target">Email Me</a>
+            <a href="https://www.linkedin.com/in/harshvardhan-singh-713817299" target="_blank" rel="noopener noreferrer" class="btn secondary-btn hover-target">LinkedIn</a>
+            <a href="https://github.com/harshvardhansingh903" target="_blank" rel="noopener noreferrer" class="btn secondary-btn hover-target">GitHub</a>
+          </div>
+        </section>
+
+        <!-- Footer Section -->
+        <footer class="portfolio-footer reveal-elem delay-1">
+          <p>&copy; 2026 Harshvardhan Singh. All rights reserved.</p>
+          <p class="footer-subtext">Built with Vanilla JS, HTML5 Canvas & Container Queries.</p>
+        </footer>
+      </div>
+    </div>
+  </div>
+  <div id="loading">
+    <div class="loader-content">
+      <div class="loader-text">Loading Assets... <span id="load-pct">0%</span></div>
+      <div class="loader-bar"><div class="loader-progress" id="load-bar"></div></div>
+    </div>
+  </div>
+  <script>
+    const NUM_FRAMES = 240;
+    const FRAME_PATH = './ezgif-frame-';
+    const FRAME_PAD = 3;
+    const FRAME_EXT = '.png';
+    const canvas = document.getElementById('frame-canvas');
+    const ctx = canvas.getContext('2d');
+    const loadingDiv = document.getElementById('loading');
+    const loadPct = document.getElementById('load-pct');
+    const loadBar = document.getElementById('load-bar');
+    const screenOverlay = document.getElementById('screen-overlay');
+    let frames = [];
+    let loadedCount = 0;
+    let allLoaded = false;
+    let lastRenderedIdx = -1; // Optimization cache to prevent over-rendering
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      lastRenderedIdx = -1; // Reset to force a fresh render on layout shifts
+      if (allLoaded) renderFrame(getFrameIndex());
+    }
+
+    // Preload frames
+    function pad(num, size) {
+      let s = num + '';
+      while (s.length < size) s = '0' + s;
+      return s;
+    }
+
+    function updateProgress() {
+      loadedCount++;
+      const pct = Math.floor((loadedCount / NUM_FRAMES) * 100);
+      if (loadPct) loadPct.innerText = pct + '%';
+      if (loadBar) loadBar.style.width = pct + '%';
+      
+      if (loadedCount === NUM_FRAMES) {
+        allLoaded = true;
+        loadingDiv.style.opacity = '0';
+        setTimeout(() => loadingDiv.style.display = 'none', 600);
+        renderFrame(getFrameIndex());
+      }
+    }
+
+    function preloadFrames() {
+      for (let i = 1; i <= NUM_FRAMES; i++) {
+        const img = new Image();
+        img.src = `${FRAME_PATH}${pad(i, FRAME_PAD)}${FRAME_EXT}`;
+        img.onload = updateProgress;
+        img.onerror = updateProgress;
+        frames.push(img);
+      }
+    }
+
+    function getFrameIndex() {
+      const scrollY = window.scrollY;
+      const maxScroll = document.body.scrollHeight - window.innerHeight;
+      const progress = Math.min(Math.max(scrollY / maxScroll, 0), 1);
+      return Math.min(NUM_FRAMES - 1, Math.floor(progress * (NUM_FRAMES - 1)));
+    }
+
+    function renderFrame(idx) {
+      if (!allLoaded) return;
+      
+      // Stop re-rendering if this is the identical frame we already painted
+      if (idx === lastRenderedIdx) return;
+      lastRenderedIdx = idx;
+
+      const img = frames[idx];
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // Center and fit image
+      const iw = img.width;
+      const ih = img.height;
+      const cw = canvas.width;
+      const ch = canvas.height;
+      let scale = Math.max(cw / iw, ch / ih);
+      let x = (cw - iw * scale) / 2;
+      let y = (ch - ih * scale) / 2;
+      ctx.drawImage(img, x, y, iw * scale, ih * scale);
+    }
+
+    function onScroll() {
+      if (!allLoaded) return;
+      const frameIdx = getFrameIndex();
+      renderFrame(frameIdx);
+
+      const scrollInstruction = document.getElementById('scroll-instruction');
+      if (scrollInstruction) {
+        if (window.scrollY > 50) {
+          scrollInstruction.classList.add('hidden');
+        } else {
+          scrollInstruction.classList.remove('hidden');
+        }
+      }
+
+      if (screenOverlay) {
+        // Activate overlay strictly on the last 2 frames
+        if (frameIdx >= NUM_FRAMES - 2) {
+          if (!screenOverlay.classList.contains("active")) {
+            screenOverlay.classList.add("active");
+          }
+        } else {
+          if (screenOverlay.classList.contains("active")) {
+            screenOverlay.classList.remove("active");
+            // Automatically reset inner scroll position when closed
+            const content = screenOverlay.querySelector('.screen-content');
+            if (content) content.scrollTop = 0;
+          }
+        }
+      }
+    }
+
+    window.addEventListener('scroll', onScroll);
+    window.addEventListener('resize', () => {
+      resizeCanvas();
+      updateOverlayPosition();
+    });
+
+    function updateOverlayPosition() {
+      if (!canvas || !screenOverlay) return;
+
+      const rect = canvas.getBoundingClientRect();
+
+      screenOverlay.style.left   = (rect.left + rect.width  * 0.180) + "px";
+      screenOverlay.style.top    = (rect.top  + rect.height * 0.089) + "px";
+      screenOverlay.style.width  = (rect.width  * 0.637) + "px";
+      screenOverlay.style.height = (rect.height * 0.718) + "px";
+    }
+
+    resizeCanvas();
+    updateOverlayPosition();
+    preloadFrames();
+
+    // =============== NEW PREMIUM EFFECTS =============== //
+
+    // 1. Intersection Observer for Scroll Reveals
+    const observerOptions = {
+      root: document.getElementById('scrollable-content'),
+      rootMargin: '0px',
+      threshold: 0.15
+    };
+
+    const observer = new IntersectionObserver((entries, observer) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          observer.unobserve(entry.target); // Only animate once
+        }
+      });
+    }, observerOptions);
+
+    const revealElements = document.querySelectorAll('.reveal-elem');
+    revealElements.forEach(el => observer.observe(el));
+
+    // 2. Subtle Parallax Effect on inner scroll
+    const scrollableContent = document.getElementById('scrollable-content');
+    const parallaxBg = document.getElementById('parallax-bg');
+    
+    scrollableContent.addEventListener('scroll', () => {
+      // Very slight parallax shift based on scroll percentage inside the screen
+      const scrollPos = scrollableContent.scrollTop;
+      const maxScroll = scrollableContent.scrollHeight - scrollableContent.clientHeight;
+      if (maxScroll <= 0) return;
+      
+      const scrollPercent = scrollPos / maxScroll;
+      // Max movement of -10px, extremely subtle
+      const yShift = scrollPercent * -10; 
+      parallaxBg.style.transform = `translateY(${yShift}px)`;
+    });
+
+    // 3. Dynamic Custom Cursor
+    const cursor = document.getElementById('custom-cursor');
+    const hoverTargets = document.querySelectorAll('.hover-target');
+    let mouseX = 0;
+    let mouseY = 0;
+    let cursorX = 0;
+    let cursorY = 0;
+    let cursorVisible = false;
+
+    // Follow mouse
+    document.addEventListener('mousemove', (e) => {
+      mouseX = e.clientX;
+      mouseY = e.clientY;
+      
+      if (!cursorVisible && screenOverlay.classList.contains('active')) {
+        cursor.style.opacity = '1';
+        cursorVisible = true;
+      }
+    });
+
+    // Add lag effect via RequestAnimationFrame
+    function animateCursor() {
+      // Lerp (Linear Interpolation) for smooth trailing effect
+      const dx = mouseX - cursorX;
+      const dy = mouseY - cursorY;
+      
+      cursorX += dx * 0.15; // 0.15 controls the "drag" / lag amount
+      cursorY += dy * 0.15;
+      
+      cursor.style.left = cursorX + 'px';
+      cursor.style.top = cursorY + 'px';
+      
+      requestAnimationFrame(animateCursor);
+    }
+    requestAnimationFrame(animateCursor);
+
+    // Hover state expansions
+    hoverTargets.forEach(target => {
+      target.addEventListener('mouseenter', () => cursor.classList.add('active-hover'));
+      target.addEventListener('mouseleave', () => cursor.classList.remove('active-hover'));
+    });
+
+    // Hide cursor if laptop magically closes
+    const originalOnScroll = onScroll; // Keep frame logic
+    onScroll = function() { // Patch it
+      originalOnScroll();
+      if (!screenOverlay.classList.contains('active') && cursorVisible) {
+        cursor.style.opacity = '0';
+        cursorVisible = false;
+      }
+    };
+    
+    // Theme Toggle Logic
+    const themeBtn = document.getElementById('theme-btn');
+    themeBtn.addEventListener('click', () => {
+      document.body.classList.toggle('light-mode-active');
+      // Rotate effect on click
+      const icon = themeBtn.querySelector('svg:not([style*="display: none"])');
+      if (icon) {
+        icon.style.transform = `rotate(${Math.random() < 0.5 ? -360 : 360}deg)`;
+        setTimeout(() => icon.style.transform = 'none', 500);
+      }
+    });
+
+    // Typing Animation
+    const typedTextSpan = document.getElementById("typed-text");
+    const phrases = ["AI Engineer", "Quant Systems Researcher", "Real-time ML Expert"];
+    let phraseIndex = 0;
+    let charIndex = 0;
+    let isDeleting = false;
+
+    function typeEffect() {
+      const currentPhrase = phrases[phraseIndex];
+      
+      if (isDeleting) {
+        typedTextSpan.textContent = currentPhrase.substring(0, charIndex - 1);
+        charIndex--;
+      } else {
+        typedTextSpan.textContent = currentPhrase.substring(0, charIndex + 1);
+        charIndex++;
+      }
+
+      let typeSpeed = isDeleting ? 50 : 100;
+
+      if (!isDeleting && charIndex === currentPhrase.length) {
+        typeSpeed = 2000; // Pause at end of word
+        isDeleting = true;
+      } else if (isDeleting && charIndex === 0) {
+        isDeleting = false;
+        phraseIndex = (phraseIndex + 1) % phrases.length;
+        typeSpeed = 500; // Pause before typing next
+      }
+
+      setTimeout(typeEffect, typeSpeed);
+    }
+    // Start typing slightly after load
+    setTimeout(typeEffect, 1500);
+
+    // 3D Tilt Effect on Cards
+    const tiltCards = document.querySelectorAll('.tilt-card');
+    tiltCards.forEach(card => {
+      card.addEventListener('mousemove', e => {
+        const rect = card.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        
+        const centerX = rect.width / 2;
+        const centerY = rect.height / 2;
+        
+        // Calculate rotation amounts (max 8 degrees)
+        const rotateX = ((y - centerY) / centerY) * -8;
+        const rotateY = ((x - centerX) / centerX) * 8;
+        
+        card.style.transform = `perspective(1000px) scale(1.02) translateY(-6px) rotateX(${rotateX}deg) rotateY(${rotateY}deg)`;
+      });
+      
+      card.addEventListener('mouseleave', () => {
+        card.style.transform = 'perspective(1000px) scale(1) translateY(0) rotateX(0) rotateY(0)';
+      });
+    });
+
+  </script>
+</body>
+</html>
